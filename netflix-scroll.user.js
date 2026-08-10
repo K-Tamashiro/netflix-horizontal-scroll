@@ -6,8 +6,8 @@
 // @author       Tamayan
 // @match        https://www.netflix.com/*
 // @match        https://*.netflix.com/*
-// @updateURL    https://raw.githubusercontent.com/zebrasoft/netflix-horizontal-scrol/main/netflix-scroll.user.js
-// @downloadURL  https://raw.githubusercontent.com/zebrasoft/netflix-horizontal-scrol/main/netflix-scroll.user.js
+// @updateURL    https://raw.githubusercontent.com/K-Tamashiro/netflix-horizontal-scroll/master/netflix-scroll.user.js
+// @downloadURL  https://raw.githubusercontent.com/K-Tamashiro/netflix-horizontal-scroll/master/netflix-scroll.user.js
 // @grant        none
 // ==/UserScript==
 
