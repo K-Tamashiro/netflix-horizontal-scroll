@@ -17,8 +17,8 @@
     let isWaiting = false;
 
     // 操作に応じた間引き時間（ミリ秒）
-    const THROTTLE_SHIFT = 350;     // Shift + 縦ホイール用（レスポンス重視）
-    const THROTTLE_SIDE = 950;      // MX Master サイドホイール用（慣性・暴走防止）
+    const THROTTLE_SHIFT = 350; // Shift + 縦ホイール用（レスポンス重視）
+    const THROTTLE_SIDE = 950; // MX Master サイドホイール用（慣性・暴走防止）
     const CLEAR_TIME = 300;
 
     let lockedRow = null;
