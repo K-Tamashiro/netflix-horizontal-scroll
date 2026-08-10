@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Netflix Shift+Wheel & MX MASTER Horizontal Scroll
 // @namespace    http://tampermonkey.net/
-// @version      3.0
+// @version      3.5
 // @description  NetflixでShift+縦ホイール、およびMX MASTERのサイドホイールでサムネイルを即座に消して横スクロールさせます
 // @author       Tamayan
 // @match        https://www.netflix.com/*
@@ -14,15 +14,29 @@
 (function() {
     'use strict';
 
-    let isWaiting = false;
+    // スクロール中にプレビュー領域を一時隠蔽するCSS
+    const style = document.createElement('style');
+    style.textContent = `
+        body.is-wheel-scrolling .bob-card-portal,
+        body.is-wheel-scrolling .bob-container,
+        body.is-wheel-scrolling .jawBoneContainer,
+        body.is-wheel-scrolling .previewModal--wrapper,
+        body.is-wheel-scrolling .mini-modal,
+        body.is-wheel-scrolling .bob-card,
+        body.is-wheel-scrolling .jawbone-wrapper {
+            display: none !important;
+            opacity: 0 !important;
+            pointer-events: none !important;
+        }
+    `;
+    document.head.appendChild(style);
 
-    // 操作に応じた間引き時間（ミリ秒）
-    const THROTTLE_SHIFT = 350; // Shift + 縦ホイール用（レスポンス重視）
-    const THROTTLE_SIDE = 950; // MX Master サイドホイール用（慣性・暴走防止）
-    const CLEAR_TIME = 300;
+    let isSessionActive = false;
+    let sessionTimer = null;
+    let lastDirection = 0; // 1: 右 (NEXT), -1: 左 (PREV)
 
-    let lockedRow = null;
-    let lockTimer = null;
+    // 回転が止まったと判定する時間（150msに短縮してレスポンス向上）
+    const SESSION_TIMEOUT = 150;
 
     const ROW_SELECTORS = [
         '[data-uia="carousel-scroller"]',
@@ -53,27 +67,9 @@
         '[class*="handle-prev"]'
     ].join(',');
 
-    const PREVIEW_SELECTORS = [
-        '.bob-card-portal',
-        '.bob-container',
-        '.jawBoneContainer',
-        '.previewModal--wrapper',
-        '.mini-modal',
-        '.bob-card',
-        '.jawbone-wrapper'
-    ].join(',');
-
     function isHorizontalScroll(e) {
         return e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY);
     }
-
-    // デフォルトのブラウザスクロールを防止
-    window.addEventListener('wheel', function(e) {
-        if (isHorizontalScroll(e)) {
-            e.preventDefault();
-            e.stopPropagation();
-        }
-    }, { passive: false });
 
     function safeClick(btn) {
         if (!btn) return false;
@@ -88,58 +84,58 @@
     window.addEventListener('wheel', function(e) {
         if (!isHorizontalScroll(e)) return;
 
-        // 拡大サムネイルの一時隠蔽
-        const activeModals = document.querySelectorAll(PREVIEW_SELECTORS);
-        activeModals.forEach(modal => {
-            modal.style.display = 'none';
-            modal.style.pointerEvents = 'none';
-        });
+        // Netflix側のネイティブスクロール・イベントを強制停止
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
 
-        // スクロール対象の「行」を検出
-        let row = lockedRow;
-        if (!row) {
-            row = e.target.closest(ROW_SELECTORS);
-            if (!row) {
-                const pointElem = document.elementFromPoint(e.clientX, e.clientY);
-                if (pointElem) row = pointElem.closest(ROW_SELECTORS);
-            }
-            if (row) {
-                lockedRow = row;
-            }
-        }
-
-        // 表示復元タイマー
-        clearTimeout(lockTimer);
-        lockTimer = setTimeout(() => {
-            lockedRow = null;
-            activeModals.forEach(modal => {
-                modal.style.display = '';
-                modal.style.pointerEvents = '';
-            });
-        }, CLEAR_TIME);
-
-        // クールダウン中、または対象行がない場合はスキップ
-        if (!row || isWaiting) return;
-
-        const delta = Math.abs(e.deltaY) > Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+        const rawDelta = Math.abs(e.deltaY) > Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
         
-        // サイドホイール（Shiftなし＆deltaX主導）かどうかの判別
-        const isSideWheel = !e.shiftKey && Math.abs(e.deltaX) > Math.abs(e.deltaY);
-        const cooldown = isSideWheel ? THROTTLE_SIDE : THROTTLE_SHIFT;
+        // 慣性の最後に残る微小なノイズ数値を無視（誤動作防止）
+        if (Math.abs(rawDelta) < 1) return;
 
-        if (delta > 0) {
-            const nextBtn = row.querySelector(NEXT_SELECTORS) || row.parentElement?.querySelector(NEXT_SELECTORS);
-            if (safeClick(nextBtn)) triggerThrottle(cooldown);
-        } else if (delta < 0) {
-            const prevBtn = row.querySelector(PREV_SELECTORS) || row.parentElement?.querySelector(PREV_SELECTORS);
-            if (safeClick(prevBtn)) triggerThrottle(cooldown);
+        const currentDirection = rawDelta > 0 ? 1 : -1;
+
+        // 【重要】回転の「向き」が変わった場合は、前回のセッションを即座に破棄して解除
+        if (currentDirection !== lastDirection) {
+            isSessionActive = false;
+            clearTimeout(sessionTimer);
         }
-    }, { passive: false });
+        lastDirection = currentDirection;
 
-    function triggerThrottle(ms) {
-        isWaiting = true;
-        setTimeout(() => {
-            isWaiting = false;
-        }, ms);
-    }
+        // プレビュー表示制御
+        document.body.classList.add('is-wheel-scrolling');
+
+        // 回転停止の検知タイマー
+        clearTimeout(sessionTimer);
+        sessionTimer = setTimeout(() => {
+            isSessionActive = false;
+            lastDirection = 0;
+            document.body.classList.remove('is-wheel-scrolling');
+        }, SESSION_TIMEOUT);
+
+        // 同一方向への回転継続中で、すでに1回移動済みの場合は残りの慣性を破棄
+        if (isSessionActive) return;
+
+        // 毎回最新のDOMからスクロール対象の行を取得（要素崩れ・固まり対策）
+        let row = e.target.closest(ROW_SELECTORS);
+        if (!row) {
+            const pointElem = document.elementFromPoint(e.clientX, e.clientY);
+            if (pointElem) row = pointElem.closest(ROW_SELECTORS);
+        }
+
+        if (!row) return;
+
+        if (currentDirection > 0) {
+            const nextBtn = row.querySelector(NEXT_SELECTORS) || row.parentElement?.querySelector(NEXT_SELECTORS);
+            if (safeClick(nextBtn)) {
+                isSessionActive = true;
+            }
+        } else if (currentDirection < 0) {
+            const prevBtn = row.querySelector(PREV_SELECTORS) || row.parentElement?.querySelector(PREV_SELECTORS);
+            if (safeClick(prevBtn)) {
+                isSessionActive = true;
+            }
+        }
+    }, { passive: false, capture: true });
 })();
