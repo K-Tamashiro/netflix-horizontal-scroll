@@ -1,4 +1,4 @@
-# 🎬 Netflix Alt+Wheel & MX MASTER Horizontal Scroll
+# 🎬 Netflix Alt+Wheel & MX MASTER Horizontal Scroll v3.6
 
 Netflixの作品一覧（行・カルーセル）を、キーボードの **Alt + 縦ホイール** や **Logicool MX Master シリーズのサムホイール（サイドホイール）** で直感的に横スクロールできるようにする Tampermonkey / ユーザースクリプトです。
 
